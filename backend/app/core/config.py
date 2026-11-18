@@ -48,9 +48,11 @@ class Settings(BaseSettings):
     RERANK_TOP_N: int = 5
 
     # ------------------------------------------------------------------ #
-    # Auth (placeholder — implemented in a later phase)
+    # Auth
     # ------------------------------------------------------------------ #
     JWT_SECRET: str = "CHANGE_ME_BEFORE_PRODUCTION"
+    # Token expiry in minutes (default 60 minutes = 1 hour)
+    JWT_EXPIRE_MINUTES: int = 60
 
     # ------------------------------------------------------------------ #
     # App
@@ -60,3 +62,11 @@ class Settings(BaseSettings):
 
 # Single shared instance — import this everywhere.
 settings = Settings()
+
+# Guard: refuse to start in production with the default placeholder secret.
+_PLACEHOLDER = "CHANGE_ME_BEFORE_PRODUCTION"
+if settings.APP_ENV == "production" and settings.JWT_SECRET == _PLACEHOLDER:
+    raise RuntimeError(
+        "JWT_SECRET is still the default placeholder. "
+        "Set a strong secret in .env before running in production."
+    )

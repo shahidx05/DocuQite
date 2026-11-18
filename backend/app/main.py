@@ -5,13 +5,17 @@ Run from the backend/ directory:
     uvicorn app.main:app --reload
 """
 
-from fastapi import FastAPI
+import logging
+
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from app.core.logging import configure_logging
-from app.api.routes import health
+from app.api.routes import health, auth, workspaces
 
 configure_logging()
+logger = logging.getLogger(__name__)
 
 app = FastAPI(
     title="Enterprise RAG Platform",
@@ -28,5 +32,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Register routers
+
+# ── Centralised error handler ──────────────────────────────────────────
+# FastAPI already returns {"detail": ...} for HTTPException by default.
+# This handler catches unexpected server errors and logs them without
+# leaking stack traces to the client.
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.error("Unhandled error on %s %s: %s", request.method, request.url.path, exc)
+    return JSONResponse(status_code=500, content={"detail": "Internal server error."})
+
+
+# ── Routers ────────────────────────────────────────────────────────────
 app.include_router(health.router, prefix="/api")
+app.include_router(auth.router, prefix="/api")
+app.include_router(workspaces.router, prefix="/api")
+
