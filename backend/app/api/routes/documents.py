@@ -34,6 +34,7 @@ from app.models.workspace import WorkspaceMember
 from app.rag.ingestion import run_ingestion
 from app.schemas.document import ChunkResponse, DocumentResponse
 from app.services.storage_service import storage
+from app.services.vector_service import delete_by_document
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["documents"])
@@ -262,6 +263,12 @@ def delete_document(
         storage.delete(doc.storage_path)
     except Exception as e:
         logger.warning("Could not delete file %s: %s", doc.storage_path, e)
+
+    # Remove vectors from Qdrant (best-effort — do not block deletion on failure)
+    try:
+        delete_by_document(document_id)
+    except Exception as e:
+        logger.warning("Could not delete vectors for doc=%s: %s", document_id, e)
 
     db.delete(doc)
     db.commit()

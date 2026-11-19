@@ -21,6 +21,8 @@ class DocumentStatus(str, enum.Enum):
     PENDING    = "PENDING"
     PROCESSING = "PROCESSING"
     CHUNKED    = "CHUNKED"
+    INDEXING   = "INDEXING"
+    COMPLETED  = "COMPLETED"
     FAILED     = "FAILED"
 
 

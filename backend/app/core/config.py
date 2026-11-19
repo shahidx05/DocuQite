@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     # Qdrant
     # ------------------------------------------------------------------ #
     QDRANT_URL: str = "http://localhost:6333"
-    QDRANT_COLLECTION: str = "documents"  # placeholder — override in .env
+    QDRANT_COLLECTION: str = "rag_chunks"   # override in .env; test uses rag_chunks_test
 
     # ------------------------------------------------------------------ #
     # LLM provider
@@ -36,8 +36,11 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ #
     # Embedding / reranking
     # ------------------------------------------------------------------ #
-    EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"  # placeholder default
-    RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"  # placeholder
+    EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"   # fastembed bi-encoder
+    EMBEDDING_DIM: int = 384                            # output dimensions
+    SPARSE_MODEL: str = "Qdrant/bm25"                  # fastembed sparse model
+    EMBED_BATCH_SIZE: int = 32                          # chunks per embed call
+    RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"  # Phase 4
 
     # ------------------------------------------------------------------ #
     # Chunking & retrieval knobs

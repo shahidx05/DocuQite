@@ -27,6 +27,7 @@ from app.api.deps import (
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceMember
 from app.schemas.workspace import AddMemberRequest, MemberResponse, WorkspaceCreate, WorkspaceResponse
+from app.services.vector_service import delete_by_workspace
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/workspaces", tags=["workspaces"])
@@ -80,6 +81,11 @@ def delete_workspace(
     workspace_and_member: tuple = Depends(require_workspace_owner),
 ) -> None:
     workspace, _ = workspace_and_member
+    # Remove all vectors for this workspace (best-effort).
+    try:
+        delete_by_workspace(workspace.id)
+    except Exception as e:
+        logger.warning("Could not delete vectors for workspace=%s: %s", workspace.id, e)
     db.delete(workspace)
     db.commit()
     logger.info("Workspace deleted: id=%s", workspace.id)
