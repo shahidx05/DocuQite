@@ -27,6 +27,9 @@ python-multipart==0.0.34
 # ── Embeddings (local, no API key needed) ─────────────────────────────
 fastembed==0.5.1
 
+# ── LLM generation ───────────────────────────────────────────────────
+google-genai==3.6.1
+
 # ── Testing / HTTP client ─────────────────────────────────────────────
 httpx==0.28.0
 pytest==8.3.3

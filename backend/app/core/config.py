@@ -9,7 +9,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=(".env", "../.env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -29,9 +29,10 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ #
     # LLM provider
     # ------------------------------------------------------------------ #
-    LLM_PROVIDER: str = "gemini"
-    GEMINI_API_KEY: str = ""             # set in .env — never commit
-    GEMINI_MODEL: str = "gemini-1.5-flash"  # placeholder default
+    LLM_PROVIDER: str = "mock"           # "gemini" | "mock" (default: "mock")
+    GEMINI_API_KEY: str = ""             # set in .env when LLM_PROVIDER=gemini — never commit
+    GEMINI_MODEL: str = "gemini-3.8-flash"  # current Gemini Flash model
+    LLM_TIMEOUT_SECONDS: int = 30
 
     # ------------------------------------------------------------------ #
     # Embedding / reranking
@@ -42,6 +43,7 @@ class Settings(BaseSettings):
     EMBED_BATCH_SIZE: int = 32                          # chunks per embed call
     RERANKER_MODEL: str = "Xenova/ms-marco-MiniLM-L-6-v2"  # fastembed cross-encoder
     RERANK_ENABLED: bool = True
+    MIN_RERANK_SCORE: float = 0.0                      # calibrated via score_check.py
 
     # ------------------------------------------------------------------ #
     # Chunking & retrieval knobs
@@ -50,6 +52,7 @@ class Settings(BaseSettings):
     CHUNK_OVERLAP: int = 150      # overlap between consecutive chunks
     RETRIEVAL_TOP_K: int = 20
     RERANK_TOP_N: int = 5
+    MAX_CONTEXT_CHARS: int = 6000
 
     # ------------------------------------------------------------------ #
     # Upload / ingestion

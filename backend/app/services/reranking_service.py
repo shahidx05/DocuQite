@@ -26,8 +26,13 @@ def _get_cross_encoder():
     if _cross_encoder is None:
         from fastembed.rerank.cross_encoder import TextCrossEncoder
 
-        logger.info("Loading cross-encoder model: %s", settings.RERANKER_MODEL)
-        _cross_encoder = TextCrossEncoder(model_name=settings.RERANKER_MODEL)
+        model_name = settings.RERANKER_MODEL
+        # Normalize legacy HuggingFace repo identifier to fastembed supported name if needed
+        if model_name == "cross-encoder/ms-marco-MiniLM-L-6-v2":
+            model_name = "Xenova/ms-marco-MiniLM-L-6-v2"
+
+        logger.info("Loading cross-encoder model: %s", model_name)
+        _cross_encoder = TextCrossEncoder(model_name=model_name)
         logger.info("Cross-encoder model ready.")
     return _cross_encoder
 

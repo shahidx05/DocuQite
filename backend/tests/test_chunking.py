@@ -58,6 +58,7 @@ class TestChunkSizeLimits:
 class TestOverlap:
     def test_overlap_tail_in_next_chunk(self):
         # Build text with clearly distinct paragraphs
+        import re
         overlap = settings.CHUNK_OVERLAP
         para_a = "AAAA " * (settings.CHUNK_SIZE // 5)
         para_b = "BBBB " * (settings.CHUNK_SIZE // 5)
@@ -65,8 +66,10 @@ class TestOverlap:
         d = _doc(f"{para_a}\n\n{para_b}\n\n{para_c}")
         chunks = chunk_document(d)
         if len(chunks) >= 2:
-            # The tail of chunk[0] should appear somewhere in chunk[1]
-            tail = chunks[0].text[-overlap:].strip()
+            # The tail of chunk[0] (snapped to word boundary) should appear somewhere in chunk[1]
+            raw_tail = chunks[0].text[-overlap:]
+            ws_match = re.search(r"\s", raw_tail)
+            tail = raw_tail[ws_match.end():].strip() if ws_match else raw_tail.strip()
             if tail:
                 assert tail in chunks[1].text
 
