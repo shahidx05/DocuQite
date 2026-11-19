@@ -21,14 +21,19 @@ IN_DOC_QUESTIONS = [
     "how do you protect my data",
     "do you share information with third parties",
     "what are my rights regarding my personal data",
+    "does the policy mention GDPR fines",
+    "who is the CEO of the company",
+    "what is the phone number for customer support",
+    "how do I delete my account step by step",
+    "what encryption algorithm do you use",
 ]
 
 OUT_OF_DOC_QUESTIONS = [
     "who won the 2018 world cup",
-    "how to bake chocolate chip cookies",
-    "what is the capital of Australia",
-    "how does a turbocharger work in a car",
-    "what is the formula for calculating compound interest",
+    "how to install python on windows",
+    "what is the capital of france",
+    "how many casual leaves can an employee take",
+    "what is the refund policy for hotel bookings",
 ]
 
 

@@ -58,6 +58,23 @@ class MockLLM:
     def generate(self, system_prompt: str, user_prompt: str) -> dict[str, Any]:
         t0 = time.perf_counter()
 
+        # Handle follow-up query rewriting in mock mode: return original question unchanged
+        if "rewrit" in system_prompt.lower() or "standalone question" in system_prompt.lower() or "follow-up question:" in user_prompt.lower():
+            match_q = re.search(r"Follow-up question:\s*(.*?)(?:\n|$)", user_prompt, re.IGNORECASE)
+            text = match_q.group(1).strip() if match_q else user_prompt.strip()
+            latency_ms = max(1, int((time.perf_counter() - t0) * 1000))
+            input_tokens = len(user_prompt.split())
+            output_tokens = len(text.split())
+            logger.info("MockLLM rewrote question (mock=True): %r", text)
+            return {
+                "text": text,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "latency_ms": latency_ms,
+                "provider": "mock",
+                "mock": True,
+            }
+
         # Extract text from Context Block [1]
         pattern = r"--- Context Block \[1\].*?---\n([\s\S]*?)(?:--- Context Block|\n*</context>|$)"
         match = re.search(pattern, user_prompt)
