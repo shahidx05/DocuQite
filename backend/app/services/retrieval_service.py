@@ -23,7 +23,7 @@ from qdrant_client.http import models as qmodels
 
 from app.core.config import settings
 from app.schemas.search import RetrievalResult
-from app.services import embedding_service
+from app.services import embedding_service, reranking_service
 from app.services.vector_service import (
     DENSE_VECTOR_NAME,
     SPARSE_VECTOR_NAME,
@@ -31,6 +31,14 @@ from app.services.vector_service import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+class RetrievalResultList(list):
+    """Subclass of list that carries rerank_ms timing metadata."""
+
+    def __init__(self, iterable=(), rerank_ms: int = 0):
+        super().__init__(iterable)
+        self.rerank_ms = rerank_ms
 
 
 def _build_filter(
@@ -76,7 +84,8 @@ def retrieve(
     top_k: Optional[int] = None,
     document_ids: Optional[list[uuid.UUID]] = None,
     collection_name: Optional[str] = None,
-) -> list[RetrievalResult]:
+    rerank: bool = False,
+) -> RetrievalResultList:
     """
     Retrieve the top-k chunks most relevant to *query* from the given workspace.
 
@@ -84,15 +93,15 @@ def retrieve(
         workspace_id:    Only return chunks belonging to this workspace.
         query:           Natural-language question or keywords.
         mode:            "dense" | "sparse" | "hybrid" (default).
-        top_k:           Number of results to return; defaults to RETRIEVAL_TOP_K.
+        top_k:           Number of results to return when rerank=False; defaults to RETRIEVAL_TOP_K.
         document_ids:    If set, restrict to these documents only.
         collection_name: Override the Qdrant collection (used in tests).
+        rerank:          If True, retrieve RETRIEVAL_TOP_K candidates then rerank to top RERANK_TOP_N.
 
     Returns:
-        List of RetrievalResult sorted by relevance (highest score first).
+        RetrievalResultList sorted by relevance (highest score first), with rerank_ms attribute.
     """
-    if top_k is None:
-        top_k = settings.RETRIEVAL_TOP_K
+    fetch_limit = settings.RETRIEVAL_TOP_K if rerank else (top_k if top_k is not None else settings.RETRIEVAL_TOP_K)
 
     name = collection_name or settings.QDRANT_COLLECTION
     client = get_qdrant_client()
@@ -116,7 +125,7 @@ def retrieve(
             query=dense_vec,
             using=DENSE_VECTOR_NAME,
             query_filter=ws_filter,
-            limit=top_k,
+            limit=fetch_limit,
             with_payload=True,
         ).points
 
@@ -126,7 +135,7 @@ def retrieve(
             query=sparse_vec,
             using=SPARSE_VECTOR_NAME,
             query_filter=ws_filter,
-            limit=top_k,
+            limit=fetch_limit,
             with_payload=True,
         ).points
 
@@ -149,11 +158,25 @@ def retrieve(
                 ),
             ],
             query=qmodels.FusionQuery(fusion=qmodels.Fusion.RRF),
-            limit=top_k,
+            limit=fetch_limit,
             with_payload=True,
         ).points
 
     qdrant_ms = int((time.perf_counter() - t1) * 1000)
     logger.info("qdrant_ms=%d  mode=%s  results=%d", qdrant_ms, mode, len(scored))
 
-    return [_point_to_result(pt, mode) for pt in scored]
+    candidates = [_point_to_result(pt, mode) for pt in scored]
+
+    # ── 3. Optional Reranking ──────────────────────────────────────────
+    if rerank:
+        t_rerank = time.perf_counter()
+        reranked = reranking_service.rerank(
+            query=query,
+            results=candidates,
+            top_n=settings.RERANK_TOP_N,
+        )
+        rerank_ms = int((time.perf_counter() - t_rerank) * 1000)
+        logger.info("rerank_ms=%d  reranked_results=%d", rerank_ms, len(reranked))
+        return RetrievalResultList(reranked, rerank_ms=rerank_ms)
+
+    return RetrievalResultList(candidates, rerank_ms=0)

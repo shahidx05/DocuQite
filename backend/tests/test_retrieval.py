@@ -20,9 +20,10 @@ from fastapi.testclient import TestClient
 from qdrant_client.http import models as qmodels
 
 import app.services.embedding_service as emb_mod
+import app.services.reranking_service as rerank_mod
 from app.core.config import settings
 from app.main import app
-from app.services import retrieval_service
+from app.services import retrieval_service, reranking_service
 from app.services.vector_service import (
     delete_by_workspace,
     ensure_collection,
@@ -44,6 +45,17 @@ def _fake_dense(text: str) -> list[float]:
 def _fake_sparse(text: str) -> dict:
     """Deterministic fake sparse vector."""
     return {"indices": [0, 1, 2], "values": [0.5, 0.3, 0.2]}
+
+
+class _FakeCrossEncoder:
+    """Deterministic fake cross-encoder model for tests."""
+    def rerank(self, query: str, documents, **kwargs):
+        for idx, doc in enumerate(documents):
+            # If doc has target or keyword, give higher score
+            if "target" in str(doc).lower() or "important" in str(doc).lower():
+                yield 9.0 - idx * 0.1
+            else:
+                yield 1.0 - idx * 0.1
 
 
 # ── Fake chunk ORM objects ─────────────────────────────────────────────────────
@@ -84,6 +96,8 @@ def patched_retrieval(monkeypatch):
     # Also patch the references inside retrieval_service (it imports the functions)
     monkeypatch.setattr("app.services.retrieval_service.embedding_service.embed_query", _fake_dense)
     monkeypatch.setattr("app.services.retrieval_service.embedding_service.sparse_query", _fake_sparse)
+    monkeypatch.setattr(rerank_mod, "_get_cross_encoder", lambda: _FakeCrossEncoder())
+    monkeypatch.setattr("app.services.retrieval_service.reranking_service._get_cross_encoder", lambda: _FakeCrossEncoder())
 
     def seed_workspace(n=3, workspace_id=None, document_id=None,
                        texts=None, section_titles=None, sparse_vecs=None):
@@ -129,6 +143,8 @@ def http_client(monkeypatch):
     monkeypatch.setattr(settings, "QDRANT_COLLECTION", TEST_COLLECTION)
     monkeypatch.setattr("app.services.retrieval_service.embedding_service.embed_query", _fake_dense)
     monkeypatch.setattr("app.services.retrieval_service.embedding_service.sparse_query", _fake_sparse)
+    monkeypatch.setattr(rerank_mod, "_get_cross_encoder", lambda: _FakeCrossEncoder())
+    monkeypatch.setattr("app.services.retrieval_service.reranking_service._get_cross_encoder", lambda: _FakeCrossEncoder())
     return TestClient(app, raise_server_exceptions=True)
 
 
@@ -323,6 +339,127 @@ class TestSearchAPI:
             assert body["query"] == "test query"
             assert body["mode"] == "hybrid"
             assert "took_ms" in body
+            assert "rerank_ms" in body
             assert isinstance(body["results"], list)
         finally:
             app.dependency_overrides.pop(deps.require_workspace_member, None)
+
+    def test_search_api_rerank_false(self, http_client, patched_retrieval):
+        """Request with rerank=false returns 200, rerank_ms=0, and no rerank_score."""
+        ws_id, _, _ = patched_retrieval["seed"](n=3)
+        from app.api import deps
+
+        def _ok(workspace_id: uuid.UUID = None):
+            return _mock_member(ws_id)
+
+        app.dependency_overrides[deps.require_workspace_member] = _ok
+        try:
+            resp = http_client.get(
+                f"/api/workspaces/{ws_id}/search",
+                params={"q": "test query", "mode": "hybrid", "top_k": 3, "rerank": "false"},
+            )
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["rerank_ms"] == 0
+            for r in body["results"]:
+                assert r["rerank_score"] is None
+                assert r["original_rank"] is None
+        finally:
+            app.dependency_overrides.pop(deps.require_workspace_member, None)
+
+    def test_search_api_rerank_true(self, http_client, patched_retrieval):
+        """Request with rerank=true returns 200, results with original_rank and rerank_score."""
+        ws_id, _, _ = patched_retrieval["seed"](n=6)
+        from app.api import deps
+
+        def _ok(workspace_id: uuid.UUID = None):
+            return _mock_member(ws_id)
+
+        app.dependency_overrides[deps.require_workspace_member] = _ok
+        try:
+            resp = http_client.get(
+                f"/api/workspaces/{ws_id}/search",
+                params={"q": "test query", "mode": "hybrid", "rerank": "true"},
+            )
+            assert resp.status_code == 200
+            body = resp.json()
+            assert len(body["results"]) <= settings.RERANK_TOP_N
+            for r in body["results"]:
+                assert r["rerank_score"] is not None
+                assert r["original_rank"] is not None
+        finally:
+            app.dependency_overrides.pop(deps.require_workspace_member, None)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Phase 4B: Reranking tests
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestReranking:
+    def test_rerank_false_keeps_old_behaviour(self, patched_retrieval):
+        """rerank=false returns candidates without cross-encoder fields and respects top_k."""
+        ws_id, _, _ = patched_retrieval["seed"](n=7)
+        results = retrieval_service.retrieve(
+            ws_id, "test query", mode="hybrid", top_k=4, rerank=False,
+            collection_name=TEST_COLLECTION
+        )
+        assert len(results) <= 4
+        assert results.rerank_ms == 0
+        for r in results:
+            assert r.rerank_score is None
+            assert r.original_rank is None
+
+    def test_rerank_true_returns_at_most_rerank_top_n(self, patched_retrieval):
+        """rerank=true returns at most RERANK_TOP_N results."""
+        ws_id, _, _ = patched_retrieval["seed"](n=10)
+        results = retrieval_service.retrieve(
+            ws_id, "test query", mode="hybrid", rerank=True,
+            collection_name=TEST_COLLECTION
+        )
+        assert len(results) <= settings.RERANK_TOP_N
+        assert len(results) >= 1
+        for r in results:
+            assert r.rerank_score is not None
+            assert r.original_rank is not None
+
+    def test_results_are_sorted_by_rerank_score(self, patched_retrieval):
+        """Results are sorted by rerank_score in descending order."""
+        texts = ["regular info", "this is important target info", "other details", "standard text"]
+        ws_id, _, _ = patched_retrieval["seed"](n=4, texts=texts)
+        results = retrieval_service.retrieve(
+            ws_id, "test query", mode="hybrid", rerank=True,
+            collection_name=TEST_COLLECTION
+        )
+        assert len(results) >= 2
+        for i in range(len(results) - 1):
+            assert results[i].rerank_score >= results[i + 1].rerank_score
+
+    def test_empty_candidate_list_does_not_crash(self):
+        """Passing an empty list to rerank returns [] without crashing."""
+        res = reranking_service.rerank("query", [])
+        assert res == []
+
+    def test_empty_workspace_retrieval_with_rerank_does_not_crash(self, patched_retrieval):
+        """Querying an empty workspace with rerank=True returns [] without error."""
+        empty_ws_id = uuid.uuid4()
+        results = retrieval_service.retrieve(
+            empty_ws_id, "test query", rerank=True, collection_name=TEST_COLLECTION
+        )
+        assert len(results) == 0
+        assert results.rerank_ms >= 0
+
+    def test_workspace_isolation_with_rerank_on(self, patched_retrieval):
+        """Workspace isolation holds when reranking is active."""
+        ws_a_id, _, chunks_a = patched_retrieval["seed"](n=3)
+        ws_b_id, _, _ = patched_retrieval["seed"](n=3)
+
+        a_chunk_ids = {c.id for c in chunks_a}
+
+        results = retrieval_service.retrieve(
+            ws_a_id, "test query", mode="hybrid", rerank=True,
+            collection_name=TEST_COLLECTION
+        )
+        assert len(results) >= 1
+        for r in results:
+            assert r.chunk_id in a_chunk_ids, "Workspace B chunk leaked into Workspace A results with rerank on"
+

@@ -17,10 +17,13 @@ class RetrievalResult(BaseModel):
     text: str
     score: float
     mode: str  # "dense" | "sparse" | "hybrid"
+    original_rank: Optional[int] = None
+    rerank_score: Optional[float] = None
 
 
 class SearchResponse(BaseModel):
     query: str
     mode: str
     took_ms: int
+    rerank_ms: int = 0
     results: list[RetrievalResult]

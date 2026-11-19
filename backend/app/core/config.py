@@ -40,7 +40,8 @@ class Settings(BaseSettings):
     EMBEDDING_DIM: int = 384                            # output dimensions
     SPARSE_MODEL: str = "Qdrant/bm25"                  # fastembed sparse model
     EMBED_BATCH_SIZE: int = 32                          # chunks per embed call
-    RERANKER_MODEL: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"  # Phase 4
+    RERANKER_MODEL: str = "Xenova/ms-marco-MiniLM-L-6-v2"  # fastembed cross-encoder
+    RERANK_ENABLED: bool = True
 
     # ------------------------------------------------------------------ #
     # Chunking & retrieval knobs
