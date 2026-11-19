@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.logging import configure_logging
-from app.api.routes import health, auth, workspaces
+from app.api.routes import health, auth, workspaces, documents
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -47,4 +47,5 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 app.include_router(health.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(workspaces.router, prefix="/api")
+app.include_router(documents.router, prefix="/api")
 

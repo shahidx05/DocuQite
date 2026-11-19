@@ -42,10 +42,16 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ #
     # Chunking & retrieval knobs
     # ------------------------------------------------------------------ #
-    CHUNK_SIZE: int = 512
-    CHUNK_OVERLAP: int = 64
+    CHUNK_SIZE: int = 1000        # characters per chunk
+    CHUNK_OVERLAP: int = 150      # overlap between consecutive chunks
     RETRIEVAL_TOP_K: int = 20
     RERANK_TOP_N: int = 5
+
+    # ------------------------------------------------------------------ #
+    # Upload / ingestion
+    # ------------------------------------------------------------------ #
+    MAX_UPLOAD_MB: int = 25
+    UPLOAD_DIR: str = "data/uploads"
 
     # ------------------------------------------------------------------ #
     # Auth

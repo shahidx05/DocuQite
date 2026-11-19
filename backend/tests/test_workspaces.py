@@ -50,7 +50,7 @@ class TestCreateWorkspace:
 
     def test_create_requires_auth(self, client):
         r = client.post("/api/workspaces", json={"name": "No Auth"})
-        assert r.status_code == 403
+        assert r.status_code == 401  # auto_error=False → we raise 401 ourselves
 
     def test_creator_appears_in_list(self, client):
         token, _ = _register_and_login(client)

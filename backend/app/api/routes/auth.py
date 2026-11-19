@@ -56,7 +56,7 @@ def register(body: RegisterRequest, db: Session = Depends(get_db)) -> UserRespon
 @router.post("/login", response_model=TokenResponse)
 def login(body: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse:
     """Authenticate and return a JWT access token."""
-    email = body.email.lower()
+    email = body.email.strip().lower()
     user = db.query(User).filter(User.email == email).first()
 
     # Same 401 for both "unknown email" and "wrong password" to prevent enumeration.

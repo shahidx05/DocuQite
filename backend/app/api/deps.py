@@ -26,7 +26,8 @@ from app.models.workspace import Workspace, WorkspaceMember
 
 logger = logging.getLogger(__name__)
 
-_bearer = HTTPBearer()
+# auto_error=False so we can raise 401 ourselves (default raises 403 when header absent)
+_bearer = HTTPBearer(auto_error=False)
 
 
 # ── Database session ───────────────────────────────────────────────────
@@ -48,7 +49,7 @@ def get_current_user(
 ) -> User:
     """
     Extract and validate the Bearer JWT. Returns the User row.
-    Raises 401 on any token problem (expired, tampered, missing).
+    Raises 401 on any token problem (expired, tampered, missing header).
     Never logs the token itself.
     """
     _401 = HTTPException(
@@ -56,6 +57,9 @@ def get_current_user(
         detail="Invalid or expired token.",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    # credentials is None when the Authorization header is absent (auto_error=False)
+    if credentials is None:
+        raise _401
     try:
         payload = decode_access_token(credentials.credentials)
         user_id: str = payload.get("sub")

@@ -80,6 +80,13 @@ class TestLogin:
         r = _login(client, email, password="wrongpassword")
         assert r.status_code == 401
 
+    def test_login_email_stripped_and_lowercased(self, client):
+        """Login must accept email with whitespace and mixed case."""
+        email = _unique_email()
+        _register(client, email)
+        r = client.post("/api/auth/login", json={"email": f"  {email.upper()}  ", "password": "password123"})
+        assert r.status_code == 200
+
     def test_login_unknown_email_401(self, client):
         r = _login(client, "nobody@nowhere.com")
         assert r.status_code == 401
@@ -115,7 +122,7 @@ class TestMe:
 
     def test_me_no_token_401(self, client):
         r = client.get("/api/auth/me")
-        assert r.status_code == 403  # HTTPBearer returns 403 when header is absent
+        assert r.status_code == 401  # auto_error=False → we raise 401 ourselves
 
     def test_me_tampered_token_401(self, client):
         token = self._get_token(client)
