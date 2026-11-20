@@ -261,3 +261,46 @@ class TestOverlapWordBoundary:
         assert not result[1].startswith("tcomputing"), (
             "Mid-word fragment 'tcomputing' leaked into the overlap prefix."
         )
+
+
+class TestChunkerFactoryAndLangChain:
+    """Tests for Phase 6B chunker factory and LangChainChunker."""
+
+    def test_default_is_custom(self):
+        from app.rag.chunking import CustomChunker, get_chunker
+        assert settings.CHUNKER == "custom"
+        chunker = get_chunker()
+        assert isinstance(chunker, CustomChunker)
+
+    def test_factory_returns_right_chunker(self):
+        from app.rag.chunking import CustomChunker, LangChainChunker, get_chunker
+        assert isinstance(get_chunker("custom"), CustomChunker)
+        assert isinstance(get_chunker("langchain"), LangChainChunker)
+
+    def test_factory_unknown_chunker_raises_error(self):
+        from app.rag.chunking import get_chunker
+        with pytest.raises(ValueError) as exc:
+            get_chunker("invalid_chunker")
+        assert "Unknown CHUNKER" in str(exc.value)
+
+    def test_langchain_chunker_respects_size_limits_and_keeps_metadata(self):
+        from app.rag.chunking import LangChainChunker
+        chunker = LangChainChunker(chunk_size=200, chunk_overlap=40)
+        d = _doc_from_blocks([
+            (1, "Section A", ("First section content. " * 15).strip()),
+            (2, "Section B", ("Second section content. " * 15).strip()),
+        ])
+        chunks = chunker.chunk(d)
+        assert len(chunks) > 2
+        # Verify chunk indices are sequential
+        assert [c.chunk_index for c in chunks] == list(range(len(chunks)))
+        # Verify section titles and pages preserved
+        sec_a_chunks = [c for c in chunks if c.section_title == "Section A"]
+        sec_b_chunks = [c for c in chunks if c.section_title == "Section B"]
+        assert len(sec_a_chunks) >= 1
+        assert len(sec_b_chunks) >= 1
+        assert all(c.page_number == 1 for c in sec_a_chunks)
+        assert all(c.page_number == 2 for c in sec_b_chunks)
+        # Verify size limits
+        for c in chunks:
+            assert c.char_count <= 250

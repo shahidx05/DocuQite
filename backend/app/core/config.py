@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------ #
     # Chunking & retrieval knobs
     # ------------------------------------------------------------------ #
+    CHUNKER: str = "custom"       # "custom" | "langchain" (default: "custom")
     CHUNK_SIZE: int = 1000        # characters per chunk
     CHUNK_OVERLAP: int = 150      # overlap between consecutive chunks
     RETRIEVAL_TOP_K: int = 20

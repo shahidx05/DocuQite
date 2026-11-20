@@ -131,18 +131,13 @@ def _add_overlap(chunks: list[str], overlap: int) -> list[str]:
     return result
 
 
-# ── Public entry point ─────────────────────────────────────────────────
+# ── Block grouping helper ──────────────────────────────────────────────
 
-def chunk_document(parsed: ParsedDocument) -> list[TextChunk]:
+def _group_blocks(parsed: ParsedDocument) -> list[tuple[Optional[int], Optional[str], str]]:
     """
-    Chunk a ParsedDocument into TextChunks using CHUNK_SIZE and CHUNK_OVERLAP
-    from settings. Never merges blocks across different section_titles.
+    Group adjacent blocks that share the same section_title.
+    A section change forces a flush so we never merge across sections.
     """
-    chunk_size = settings.CHUNK_SIZE
-    overlap    = settings.CHUNK_OVERLAP
-
-    # Group adjacent blocks that share the same section_title.
-    # A section change forces a flush so we never merge across sections.
     groups: list[tuple[Optional[int], Optional[str], str]] = []
     current_title: Optional[str] = None
     current_page: Optional[int] = None
@@ -157,27 +152,96 @@ def chunk_document(parsed: ParsedDocument) -> list[TextChunk]:
         if block.section_title != current_title:
             _flush_group()
             current_title = block.section_title
-            current_page  = block.page_number
+            current_page = block.page_number
         elif current_page is None and block.page_number is not None:
             current_page = block.page_number
         buffer.append(block.text)
 
     _flush_group()
+    return groups
 
-    # Split each group and collect TextChunks
-    all_chunks: list[TextChunk] = []
-    idx = 0
-    for page_num, section_title, text in groups:
-        raw_pieces = _split_to_fit(text, chunk_size)
-        with_overlap = _add_overlap(raw_pieces, overlap)
-        for piece in with_overlap:
-            if piece.strip():
-                all_chunks.append(TextChunk(
-                    chunk_index=idx,
-                    page_number=page_num,
-                    section_title=section_title,
-                    text=piece.strip(),
-                ))
-                idx += 1
 
-    return all_chunks
+# ── Chunker Classes ────────────────────────────────────────────────────
+
+class CustomChunker:
+    """Structure-aware recursive text chunker with word-boundary snapping."""
+
+    def __init__(self, chunk_size: Optional[int] = None, chunk_overlap: Optional[int] = None):
+        self.chunk_size = chunk_size or settings.CHUNK_SIZE
+        self.chunk_overlap = chunk_overlap or settings.CHUNK_OVERLAP
+
+    def chunk(self, parsed: ParsedDocument) -> list[TextChunk]:
+        groups = _group_blocks(parsed)
+        all_chunks: list[TextChunk] = []
+        idx = 0
+        for page_num, section_title, text in groups:
+            raw_pieces = _split_to_fit(text, self.chunk_size)
+            with_overlap = _add_overlap(raw_pieces, self.chunk_overlap)
+            for piece in with_overlap:
+                if piece.strip():
+                    all_chunks.append(TextChunk(
+                        chunk_index=idx,
+                        page_number=page_num,
+                        section_title=section_title,
+                        text=piece.strip(),
+                    ))
+                    idx += 1
+        return all_chunks
+
+
+class LangChainChunker:
+    """LangChain RecursiveCharacterTextSplitter wrapper matching TextChunk structure."""
+
+    def __init__(self, chunk_size: Optional[int] = None, chunk_overlap: Optional[int] = None):
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+
+        self.chunk_size = chunk_size or settings.CHUNK_SIZE
+        self.chunk_overlap = chunk_overlap or settings.CHUNK_OVERLAP
+        self.splitter = RecursiveCharacterTextSplitter(
+            chunk_size=self.chunk_size,
+            chunk_overlap=self.chunk_overlap,
+        )
+
+    def chunk(self, parsed: ParsedDocument) -> list[TextChunk]:
+        groups = _group_blocks(parsed)
+        all_chunks: list[TextChunk] = []
+        idx = 0
+        for page_num, section_title, text in groups:
+            pieces = self.splitter.split_text(text)
+            for piece in pieces:
+                if piece.strip():
+                    all_chunks.append(TextChunk(
+                        chunk_index=idx,
+                        page_number=page_num,
+                        section_title=section_title,
+                        text=piece.strip(),
+                    ))
+                    idx += 1
+        return all_chunks
+
+
+# ── Public entry point & factory ────────────────────────────────────────
+
+def get_chunker(name: Optional[str] = None):
+    """
+    Chunker factory function.
+    Reads CHUNKER from settings if name is not explicitly passed.
+    Raises ValueError on unknown chunker name.
+    """
+    chunker_name = (name or settings.CHUNKER).lower().strip()
+    if chunker_name == "custom":
+        return CustomChunker()
+    elif chunker_name == "langchain":
+        return LangChainChunker()
+    else:
+        raise ValueError(
+            f"Unknown CHUNKER: {chunker_name!r}. Supported values are 'custom' and 'langchain'."
+        )
+
+
+def chunk_document(parsed: ParsedDocument) -> list[TextChunk]:
+    """
+    Public entry point for chunking.
+    Uses chunker selected by settings.CHUNKER (default: 'custom').
+    """
+    return get_chunker().chunk(parsed)
