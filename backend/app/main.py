@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.logging import configure_logging
-from app.api.routes import health, auth, workspaces, documents, search, ask, chats
+from app.api.routes import health, auth, workspaces, documents, search, ask, chats, traces
 
 configure_logging()
 logger = logging.getLogger(__name__)
@@ -51,4 +51,5 @@ app.include_router(documents.router, prefix="/api")
 app.include_router(search.router, prefix="/api")
 app.include_router(ask.router, prefix="/api")
 app.include_router(chats.router, prefix="/api")
+app.include_router(traces.router, prefix="/api")
 

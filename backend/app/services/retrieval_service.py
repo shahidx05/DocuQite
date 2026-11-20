@@ -34,11 +34,21 @@ logger = logging.getLogger(__name__)
 
 
 class RetrievalResultList(list):
-    """Subclass of list that carries rerank_ms timing metadata."""
+    """Subclass of list that carries rerank_ms and pipeline timing metadata."""
 
-    def __init__(self, iterable=(), rerank_ms: int = 0):
+    def __init__(
+        self,
+        iterable=(),
+        rerank_ms: int = 0,
+        embed_ms: int = 0,
+        qdrant_ms: int = 0,
+        candidates_count: int = 0,
+    ):
         super().__init__(iterable)
         self.rerank_ms = rerank_ms
+        self.embed_ms = embed_ms
+        self.qdrant_ms = qdrant_ms
+        self.candidates_count = candidates_count
 
 
 def _build_filter(
@@ -166,6 +176,7 @@ def retrieve(
     logger.info("qdrant_ms=%d  mode=%s  results=%d", qdrant_ms, mode, len(scored))
 
     candidates = [_point_to_result(pt, mode) for pt in scored]
+    candidates_count = len(candidates)
 
     # ── 3. Optional Reranking ──────────────────────────────────────────
     if rerank:
@@ -177,6 +188,18 @@ def retrieve(
         )
         rerank_ms = int((time.perf_counter() - t_rerank) * 1000)
         logger.info("rerank_ms=%d  reranked_results=%d", rerank_ms, len(reranked))
-        return RetrievalResultList(reranked, rerank_ms=rerank_ms)
+        return RetrievalResultList(
+            reranked,
+            rerank_ms=rerank_ms,
+            embed_ms=embed_ms,
+            qdrant_ms=qdrant_ms,
+            candidates_count=candidates_count,
+        )
 
-    return RetrievalResultList(candidates, rerank_ms=0)
+    return RetrievalResultList(
+        candidates,
+        rerank_ms=0,
+        embed_ms=embed_ms,
+        qdrant_ms=qdrant_ms,
+        candidates_count=candidates_count,
+    )

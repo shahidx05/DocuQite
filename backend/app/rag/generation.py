@@ -52,6 +52,10 @@ def answer(
         collection_name=collection_name,
     )
     retrieval_ms = int((time.perf_counter() - t_ret) * 1000)
+    embed_ms = getattr(candidates, "embed_ms", 0)
+    qdrant_ms = getattr(candidates, "qdrant_ms", 0)
+    rerank_ms = getattr(candidates, "rerank_ms", 0)
+    candidates_count = getattr(candidates, "candidates_count", len(candidates))
 
     # ── 2. Abstention check ────────────────────────────────────────────
     # If no results or top score below threshold, abstain immediately without calling LLM.
@@ -72,11 +76,16 @@ def answer(
                 retrieval_ms=retrieval_ms,
                 llm_ms=0,
                 total_ms=total_ms,
+                embed_ms=embed_ms,
+                qdrant_ms=qdrant_ms,
+                rerank_ms=rerank_ms,
             ),
             tokens=AskTokens(
                 input_tokens=0,
                 output_tokens=0,
             ),
+            candidates_count=candidates_count,
+            top_rerank_score=top_score,
         )
 
     # ── 3. Build context blocks respecting MAX_CONTEXT_CHARS ───────────
@@ -119,8 +128,17 @@ def answer(
             answer=ABSTENTION_MESSAGE,
             abstained=True,
             citations=[],
-            timings=AskTimings(retrieval_ms=retrieval_ms, llm_ms=llm_ms, total_ms=total_ms),
+            timings=AskTimings(
+                retrieval_ms=retrieval_ms,
+                llm_ms=llm_ms,
+                total_ms=total_ms,
+                embed_ms=embed_ms,
+                qdrant_ms=qdrant_ms,
+                rerank_ms=rerank_ms,
+            ),
             tokens=AskTokens(input_tokens=input_tokens, output_tokens=output_tokens),
+            candidates_count=candidates_count,
+            top_rerank_score=top_score,
         )
 
     valid_indices = {b["index"] for b in context_blocks}
@@ -159,6 +177,15 @@ def answer(
         answer=cleaned_answer,
         abstained=False,
         citations=citations,
-        timings=AskTimings(retrieval_ms=retrieval_ms, llm_ms=llm_ms, total_ms=total_ms),
+        timings=AskTimings(
+            retrieval_ms=retrieval_ms,
+            llm_ms=llm_ms,
+            total_ms=total_ms,
+            embed_ms=embed_ms,
+            qdrant_ms=qdrant_ms,
+            rerank_ms=rerank_ms,
+        ),
         tokens=AskTokens(input_tokens=input_tokens, output_tokens=output_tokens),
+        candidates_count=candidates_count,
+        top_rerank_score=top_score,
     )

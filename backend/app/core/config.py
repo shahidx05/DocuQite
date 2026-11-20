@@ -34,6 +34,10 @@ class Settings(BaseSettings):
     GEMINI_MODEL: str = "gemini-3.8-flash"  # current Gemini Flash model
     LLM_TIMEOUT_SECONDS: int = 30
 
+    # LLM pricing per 1M tokens
+    LLM_PRICE_INPUT_PER_1M: float = 0.0
+    LLM_PRICE_OUTPUT_PER_1M: float = 0.0
+
     # ------------------------------------------------------------------ #
     # Embedding / reranking
     # ------------------------------------------------------------------ #

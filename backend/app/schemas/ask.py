@@ -25,6 +25,9 @@ class AskTimings(BaseModel):
     retrieval_ms: int
     llm_ms: int
     total_ms: int
+    embed_ms: int = 0
+    qdrant_ms: int = 0
+    rerank_ms: int = 0
 
 
 class AskTokens(BaseModel):
@@ -38,3 +41,5 @@ class AskResponse(BaseModel):
     citations: list[Citation]
     timings: AskTimings
     tokens: AskTokens
+    candidates_count: int = 0
+    top_rerank_score: Optional[float] = None

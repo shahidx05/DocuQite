@@ -30,6 +30,7 @@ from app.schemas.chat import (
     ChatSessionDetailResponse,
     ChatSessionResponse,
 )
+from app.services import tracing_service
 
 logger = logging.getLogger(__name__)
 
@@ -176,59 +177,107 @@ def post_chat_message(
     and return the assistant message.
     """
     chat = _get_user_chat_session(chat_id, current_user.id, db)
+    t_start = datetime.now(timezone.utc)
+    import time
+    t0 = time.perf_counter()
+    q_len = len(body.question)
+    rewrite_ms = 0
 
-    # 1. Fetch prior messages for this session
-    prior_messages = (
-        db.query(ChatMessage)
-        .filter(ChatMessage.session_id == chat.id)
-        .order_by(ChatMessage.created_at.asc())
-        .all()
-    )
+    try:
+        # 1. Fetch prior messages for this session
+        prior_messages = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.session_id == chat.id)
+            .order_by(ChatMessage.created_at.asc())
+            .all()
+        )
 
-    # 2. Update title if this is the first message or still default
-    if not prior_messages or chat.title == "New Chat":
-        chat.title = body.question[:60].strip()
+        # 2. Update title if this is the first message or still default
+        if not prior_messages or chat.title == "New Chat":
+            chat.title = body.question[:60].strip()
 
-    # 3. Follow-up rewriting: rewrite if history exists, skip if first message
-    if prior_messages:
-        rewritten_question = rewrite_question(question=body.question, history=prior_messages)
-    else:
-        rewritten_question = body.question
+        # 3. Follow-up rewriting: rewrite if history exists, skip if first message
+        if prior_messages:
+            t_rew = time.perf_counter()
+            rewritten_question = rewrite_question(question=body.question, history=prior_messages)
+            rewrite_ms = int((time.perf_counter() - t_rew) * 1000)
+        else:
+            rewritten_question = body.question
 
-    # 4. Run RAG retrieval + generation using the rewritten question
-    rag_result = answer(workspace_id=chat.workspace_id, question=rewritten_question)
+        # 4. Run RAG retrieval + generation using the rewritten question
+        rag_result = answer(workspace_id=chat.workspace_id, question=rewritten_question)
 
-    # 5. Persist user message
-    user_msg = ChatMessage(
-        session_id=chat.id,
-        role="user",
-        content=body.question,
-    )
-    db.add(user_msg)
+        # 5. Persist user message
+        user_msg = ChatMessage(
+            session_id=chat.id,
+            role="user",
+            content=body.question,
+        )
+        db.add(user_msg)
 
-    # 6. Persist assistant message
-    citations_data = (
-        [c.model_dump(mode="json") for c in rag_result.citations] if rag_result.citations else None
-    )
-    metadata_dict = {
-        "rewritten_question": rewritten_question,
-        "timings": rag_result.timings.model_dump() if rag_result.timings else None,
-        "tokens": rag_result.tokens.model_dump() if rag_result.tokens else None,
-    }
+        # 6. Persist assistant message
+        citations_data = (
+            [c.model_dump(mode="json") for c in rag_result.citations] if rag_result.citations else None
+        )
+        metadata_dict = {
+            "rewritten_question": rewritten_question,
+            "timings": rag_result.timings.model_dump() if rag_result.timings else None,
+            "tokens": rag_result.tokens.model_dump() if rag_result.tokens else None,
+        }
 
-    assistant_msg = ChatMessage(
-        session_id=chat.id,
-        role="assistant",
-        content=rag_result.answer,
-        citations=citations_data,
-        abstained=rag_result.abstained,
-        meta=metadata_dict,
-    )
-    db.add(assistant_msg)
+        assistant_msg = ChatMessage(
+            session_id=chat.id,
+            role="assistant",
+            content=rag_result.answer,
+            citations=citations_data,
+            abstained=rag_result.abstained,
+            meta=metadata_dict,
+        )
+        db.add(assistant_msg)
 
-    # 7. Update chat session timestamp
-    chat.updated_at = datetime.now(timezone.utc)
-    db.commit()
-    db.refresh(assistant_msg)
+        # 7. Update chat session timestamp
+        chat.updated_at = datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(assistant_msg)
 
-    return assistant_msg
+        total_ms = int((time.perf_counter() - t0) * 1000)
+        try:
+            tracing_service.record_trace(
+                workspace_id=chat.workspace_id,
+                user_id=current_user.id,
+                source="chat",
+                question_length=q_len,
+                rewrite_ms=rewrite_ms,
+                embed_ms=rag_result.timings.embed_ms,
+                qdrant_ms=rag_result.timings.qdrant_ms,
+                rerank_ms=rag_result.timings.rerank_ms,
+                llm_ms=rag_result.timings.llm_ms,
+                total_ms=total_ms,
+                input_tokens=rag_result.tokens.input_tokens,
+                output_tokens=rag_result.tokens.output_tokens,
+                candidates_count=rag_result.candidates_count,
+                abstained=rag_result.abstained,
+                top_rerank_score=rag_result.top_rerank_score,
+                error=None,
+                db=db,
+            )
+        except Exception as t_err:
+            logger.error("Failed to record trace for chat message: %s", t_err)
+
+        return assistant_msg
+    except Exception as exc:
+        total_ms = int((time.perf_counter() - t0) * 1000)
+        try:
+            tracing_service.record_trace(
+                workspace_id=chat.workspace_id,
+                user_id=current_user.id,
+                source="chat",
+                question_length=q_len,
+                rewrite_ms=rewrite_ms,
+                total_ms=total_ms,
+                error=str(exc),
+                db=db,
+            )
+        except Exception as t_err:
+            logger.error("Failed to record trace for chat error: %s", t_err)
+        raise
