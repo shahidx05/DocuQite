@@ -1,13 +1,17 @@
 """
 scripts/score_check.py — Calibrate MIN_RERANK_SCORE on real data.
 
-Prints top rerank score for 5 in-document questions and 5 out-of-document questions.
+Prints top rerank score across three categories:
+1. In-document questions (should rank high and pass threshold)
+2. Tricky out-of-document questions (related topic or terms, but unanswerable from doc)
+3. Completely out-of-document questions (completely unrelated topic)
+
 Usage:
     python scripts/score_check.py <workspace_id>
 """
 
-import sys
 import os
+import sys
 import uuid
 
 # Ensure backend root is on sys.path
@@ -21,6 +25,9 @@ IN_DOC_QUESTIONS = [
     "how do you protect my data",
     "do you share information with third parties",
     "what are my rights regarding my personal data",
+]
+
+TRICKY_OUT_OF_DOC_QUESTIONS = [
     "does the policy mention GDPR fines",
     "who is the CEO of the company",
     "what is the phone number for customer support",
@@ -37,6 +44,21 @@ OUT_OF_DOC_QUESTIONS = [
 ]
 
 
+def evaluate_questions(workspace_id: uuid.UUID, questions: list[str], label: str) -> list[float]:
+    print(f"=== {label} ===")
+    scores = []
+    for q in questions:
+        results = retrieve(workspace_id=workspace_id, query=q, mode="hybrid", rerank=True)
+        top_score = results[0].rerank_score if results else None
+        if top_score is not None:
+            scores.append(top_score)
+            print(f"  Score: {top_score:8.4f} | Q: {q}")
+        else:
+            print(f"  Score:     None | Q: {q}")
+    print()
+    return scores
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python scripts/score_check.py <workspace_id>")
@@ -45,34 +67,23 @@ def main():
     workspace_id = uuid.UUID(sys.argv[1])
     print(f"Calibrating rerank scores for workspace {workspace_id}\n")
 
-    print("=== IN-DOCUMENT QUESTIONS ===")
-    in_scores = []
-    for q in IN_DOC_QUESTIONS:
-        results = retrieve(workspace_id=workspace_id, query=q, mode="hybrid", rerank=True)
-        top_score = results[0].rerank_score if results else None
-        in_scores.append(top_score)
-        print(f"  Score: {top_score:8.4f} | Q: {q}")
+    in_scores = evaluate_questions(workspace_id, IN_DOC_QUESTIONS, "IN-DOCUMENT QUESTIONS")
+    tricky_scores = evaluate_questions(workspace_id, TRICKY_OUT_OF_DOC_QUESTIONS, "TRICKY OUT-OF-DOCUMENT")
+    out_scores = evaluate_questions(workspace_id, OUT_OF_DOC_QUESTIONS, "OUT-OF-DOCUMENT QUESTIONS")
 
-    print("\n=== OUT-OF-DOCUMENT QUESTIONS ===")
-    out_scores = []
-    for q in OUT_OF_DOC_QUESTIONS:
-        results = retrieve(workspace_id=workspace_id, query=q, mode="hybrid", rerank=True)
-        top_score = results[0].rerank_score if results else None
-        out_scores.append(top_score)
-        print(f"  Score: {top_score:8.4f} | Q: {q}")
-
-    valid_in = [s for s in in_scores if s is not None]
-    valid_out = [s for s in out_scores if s is not None]
-
-    print("\n=== SUMMARY ===")
-    if valid_in:
-        print(f"In-doc min score:  {min(valid_in):.4f}")
-        print(f"In-doc max score:  {max(valid_in):.4f}")
-        print(f"In-doc mean score: {sum(valid_in) / len(valid_in):.4f}")
-    if valid_out:
-        print(f"Out-of-doc min score:  {min(valid_out):.4f}")
-        print(f"Out-of-doc max score:  {max(valid_out):.4f}")
-        print(f"Out-of-doc mean score: {sum(valid_out) / len(valid_out):.4f}")
+    print("=== SUMMARY ===")
+    if in_scores:
+        print(f"In-doc min score:     {min(in_scores):.4f}")
+        print(f"In-doc max score:     {max(in_scores):.4f}")
+        print(f"In-doc mean score:    {sum(in_scores) / len(in_scores):.4f}")
+    if tricky_scores:
+        print(f"Tricky max score:     {max(tricky_scores):.4f}")
+        print(f"Tricky min score:     {min(tricky_scores):.4f}")
+        print(f"Tricky mean score:    {sum(tricky_scores) / len(tricky_scores):.4f}")
+    if out_scores:
+        print(f"Out-of-doc max score: {max(out_scores):.4f}")
+        print(f"Out-of-doc min score: {min(out_scores):.4f}")
+        print(f"Out-of-doc mean score:{sum(out_scores) / len(out_scores):.4f}")
 
 
 if __name__ == "__main__":
