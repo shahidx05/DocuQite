@@ -52,10 +52,17 @@ def ensure_collection(collection_name: str | None = None) -> None:
     name = collection_name or settings.QDRANT_COLLECTION
     client = get_qdrant_client()
 
-    existing = {c.name for c in client.get_collections().collections}
-    if name in existing:
-        logger.debug("Collection '%s' already exists — skipping create.", name)
+    if client.collection_exists(name):
+        logger.debug("Collection or alias '%s' already exists — skipping create.", name)
         return
+
+    try:
+        existing_aliases = {a.alias_name for a in client.get_aliases().aliases}
+        if name in existing_aliases:
+            logger.debug("Alias '%s' already exists — skipping create.", name)
+            return
+    except Exception:
+        pass
 
     client.create_collection(
         collection_name=name,
