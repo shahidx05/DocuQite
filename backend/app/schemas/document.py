@@ -16,6 +16,8 @@ class DocumentResponse(BaseModel):
     filename: str
     file_type: str
     file_size: int
+    source_url: Optional[str] = None
+    source_title: Optional[str] = None
     status: str
     error_message: Optional[str]
     page_count: Optional[int]

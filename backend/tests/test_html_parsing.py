@@ -233,9 +233,9 @@ class TestRedactPII:
             assert redact_pii(inp) == expected
 
     def test_redact_roll_numbers(self):
-        text = "Students 0901IT221001 and 0901CS201045 passed the exam."
+        text = "Students 0901IT221001, 0901CS201045, BTIT24O1009, and BTCS23O1234 passed the exam."
         redacted = redact_pii(text)
-        assert redacted == "Students [roll] and [roll] passed the exam."
+        assert redacted == "Students [roll], [roll], [roll], and [roll] passed the exam."
 
     def test_normal_numbers_untouched(self):
         text = "In year 2024, on Page 42, item 1234 cost 12345 in zip 474005 with serial 123456."

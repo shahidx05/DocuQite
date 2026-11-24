@@ -21,7 +21,7 @@ from app.core.config import settings
 from app.models.document import Chunk, Document, DocumentStatus
 from app.rag.chunking import chunk_document
 from app.rag.cleaning import clean_document
-from app.rag.parsing import parse_document
+from app.rag.parsing import ParsedDocument, parse_document
 from app.services import embedding_service
 from app.services.vector_service import (
     delete_by_document,
@@ -50,11 +50,18 @@ def _build_embed_text(document_name: str, section_title: str | None, chunk_text:
     return f"{prefix}\n{chunk_text}"
 
 
-def run_ingestion(document_id: uuid.UUID, db: Session, storage_path: str) -> None:
+def run_ingestion(
+    document_id: uuid.UUID,
+    db: Session,
+    storage_path: str,
+    pre_parsed_doc: ParsedDocument | None = None,
+) -> None:
     """
-    Entry point called by the BackgroundTask.
+    Entry point called by the BackgroundTask or batch loaders.
     Fetches the Document row, runs the full pipeline, and writes the result back.
     db is a NEW session created inside the background task (not the request session).
+    If pre_parsed_doc is provided, uses it instead of parsing from file_path
+    (enables cross-page boilerplate removal across sets before individual ingestion).
     """
     doc = db.get(Document, document_id)
     if doc is None:
@@ -71,9 +78,16 @@ def run_ingestion(document_id: uuid.UUID, db: Session, storage_path: str) -> Non
     try:
         # ── Parse ──────────────────────────────────────────────────────
         t0 = time.monotonic()
-        parsed = parse_document(file_path, doc.file_type)
+        if pre_parsed_doc is not None:
+            parsed = pre_parsed_doc
+        else:
+            parsed = parse_document(file_path, doc.file_type)
         parse_ms = int((time.monotonic() - t0) * 1000)
         logger.info("doc=%s parse=%dms pages=%d", document_id, parse_ms, parsed.page_count)
+
+        # Fallback to parsed title if source_title was not explicitly provided
+        if not doc.source_title and parsed.title:
+            doc.source_title = parsed.title
 
         # ── Clean ──────────────────────────────────────────────────────
         t0 = time.monotonic()
@@ -123,8 +137,11 @@ def run_ingestion(document_id: uuid.UUID, db: Session, storage_path: str) -> Non
         doc.updated_at = _now()
         db.commit()
 
+        # Use source_title (fallback: filename) for embedding context and citations
+        doc_name = doc.source_title or doc.filename
+
         embed_texts = [
-            _build_embed_text(doc.filename, row.section_title, row.text)
+            _build_embed_text(doc_name, row.section_title, row.text)
             for row in chunk_rows
         ]
 
@@ -144,7 +161,14 @@ def run_ingestion(document_id: uuid.UUID, db: Session, storage_path: str) -> Non
         # ── Upsert into Qdrant ─────────────────────────────────────────
         ensure_collection()
         t0 = time.monotonic()
-        upsert_chunks(chunk_rows, doc.filename, dense_vecs, sparse_vecs)
+        upsert_chunks(
+            chunk_rows,
+            doc_name,
+            dense_vecs,
+            sparse_vecs,
+            source_url=doc.source_url,
+            source_title=doc.source_title,
+        )
         upsert_ms = int((time.monotonic() - t0) * 1000)
         logger.info("doc=%s upsert=%dms", document_id, upsert_ms)
 

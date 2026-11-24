@@ -33,9 +33,9 @@ MIN_CORPUS_SIZE_FOR_BOILERPLATE = 5
 PII_EMAIL_PATTERN = re.compile(
     r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
 )
-# Roll / enrolment numbers e.g. 0901IT221001, 0901CS201045
+# Roll / enrolment numbers e.g. 0901IT221001, 0901CS201045, BTIT24O1009, BTCS23O1234
 PII_ROLL_PATTERN = re.compile(
-    r"\b0901[A-Za-z0-9]{6,12}\b",
+    r"\b(?:0901[A-Za-z0-9]{6,12}|[A-Za-z]{2,6}\d{2}[A-Za-z]?\d{3,6})\b",
     re.IGNORECASE,
 )
 # 10-digit phone numbers with optional +91, single spaces or dashes between digits.

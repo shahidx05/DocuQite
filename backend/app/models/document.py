@@ -45,7 +45,10 @@ class Document(Base):
     )
     # Original filename sanitised for display only — never used as a filesystem path.
     filename: Mapped[str] = mapped_column(String(512), nullable=False)
-    file_type: Mapped[str] = mapped_column(String(8), nullable=False)   # pdf|docx|pptx
+    file_type: Mapped[str] = mapped_column(String(8), nullable=False)   # pdf|docx|pptx|html
+    # Human-readable title and original source URL (e.g. from scraping manifest)
+    source_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    source_title: Mapped[str | None] = mapped_column(String(512), nullable=True)
     # Path on disk relative to UPLOAD_DIR, using a UUID filename (not user-supplied).
     storage_path: Mapped[str] = mapped_column(String(512), nullable=False)
     file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)

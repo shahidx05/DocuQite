@@ -96,6 +96,8 @@ def upsert_chunks(
     dense_vecs: list[list[float]],
     sparse_vecs: list[dict],
     collection_name: str | None = None,
+    source_url: str | None = None,
+    source_title: str | None = None,
 ) -> None:
     """
     Upsert one Qdrant point per chunk.
@@ -124,6 +126,8 @@ def upsert_chunks(
                     "document_id":   str(chunk.document_id),
                     "workspace_id":  str(chunk.workspace_id),
                     "document_name": document_name,
+                    "source_url":    source_url,
+                    "source_title":  source_title,
                     "page_number":   chunk.page_number,
                     "section_title": chunk.section_title,
                     "chunk_index":   chunk.chunk_index,
