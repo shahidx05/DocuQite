@@ -4,9 +4,10 @@ rag/parsing.py — Convert uploaded files into a uniform ParsedDocument structur
 ParsedDocument holds a list of ParsedBlocks, one per page (PDF/PPTX) or logical
 section (DOCX). The cleaning and chunking stages receive this structure.
 
-Supported formats:  pdf, docx, pptx
+Supported formats:  pdf, docx, pptx, html
 """
 
+from html.parser import HTMLParser
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -24,6 +25,7 @@ class ParsedBlock:
 @dataclass
 class ParsedDocument:
     blocks: list[ParsedBlock] = field(default_factory=list)
+    title: Optional[str] = None
 
     @property
     def page_count(self) -> int:
@@ -254,11 +256,172 @@ def _parse_pptx(path: Path) -> ParsedDocument:
     return parsed
 
 
+# ── HTML ───────────────────────────────────────────────────────────────
+
+_IGNORED_HTML_TAGS = {
+    "script", "style", "nav", "header", "footer",
+    "aside", "form", "noscript", "svg",
+}
+_HEADING_TAGS = {"h1", "h2", "h3", "h4"}
+_BLOCK_TAGS = {
+    "p", "li", "div", "blockquote", "article",
+    "section", "main", "hr", "br",
+}
+
+
+class _HTMLDocParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.ignore_depth = 0
+
+        # Title
+        self.in_title = False
+        self.title_parts: list[str] = []
+        self.document_title: Optional[str] = None
+
+        # Heading / sections
+        self.current_section: Optional[str] = None
+        self.in_heading = False
+        self.heading_parts: list[str] = []
+
+        # Tables
+        self.in_tr = False
+        self.in_cell = False
+        self.cell_parts: list[str] = []
+        self.row_cells: list[str] = []
+
+        # Regular inline text flow
+        self.inline_parts: list[str] = []
+        self.block_lines: list[str] = []
+        self.blocks: list[ParsedBlock] = []
+
+    def _flush_inline(self):
+        """Collapse whitespace in current inline accumulator and push to block_lines."""
+        if self.inline_parts:
+            text = " ".join("".join(self.inline_parts).split())
+            if text:
+                self.block_lines.append(text)
+            self.inline_parts = []
+
+    def _flush_block(self):
+        """Flush accumulated block_lines as a ParsedBlock."""
+        self._flush_inline()
+        text = "\n".join(self.block_lines).strip()
+        if text:
+            self.blocks.append(ParsedBlock(
+                page_number=None,
+                section_title=self.current_section,
+                text=text,
+            ))
+        self.block_lines = []
+
+    def handle_starttag(self, tag: str, attrs):
+        tag_lower = tag.lower()
+        if tag_lower in _IGNORED_HTML_TAGS:
+            self.ignore_depth += 1
+            return
+        if self.ignore_depth > 0:
+            return
+
+        if tag_lower == "title":
+            self.in_title = True
+        elif tag_lower in _HEADING_TAGS:
+            self._flush_block()
+            self.in_heading = True
+            self.heading_parts = []
+        elif tag_lower == "tr":
+            self._flush_inline()
+            self.in_tr = True
+            self.row_cells = []
+        elif tag_lower in ("td", "th") and self.in_tr:
+            self.in_cell = True
+            self.cell_parts = []
+        elif tag_lower in _BLOCK_TAGS:
+            self._flush_inline()
+
+    def handle_endtag(self, tag: str):
+        tag_lower = tag.lower()
+        if tag_lower in _IGNORED_HTML_TAGS:
+            self.ignore_depth = max(0, self.ignore_depth - 1)
+            return
+        if self.ignore_depth > 0:
+            return
+
+        if tag_lower == "title":
+            self.in_title = False
+            title_text = " ".join("".join(self.title_parts).split())
+            if title_text:
+                self.document_title = title_text
+        elif tag_lower in _HEADING_TAGS:
+            self.in_heading = False
+            heading_text = " ".join("".join(self.heading_parts).split())
+            if heading_text:
+                self.current_section = heading_text
+                self.block_lines.append(heading_text)
+            self.heading_parts = []
+        elif tag_lower in ("td", "th") and self.in_tr:
+            self.in_cell = False
+            cell_text = " ".join("".join(self.cell_parts).split())
+            self.row_cells.append(cell_text)
+            self.cell_parts = []
+        elif tag_lower == "tr":
+            self.in_tr = False
+            if self.row_cells:
+                row_str = " | ".join(self.row_cells).strip()
+                if row_str:
+                    self.block_lines.append(row_str)
+            self.row_cells = []
+        elif tag_lower in _BLOCK_TAGS:
+            self._flush_inline()
+
+    def handle_data(self, data: str):
+        if self.ignore_depth > 0:
+            return
+        if self.in_title:
+            self.title_parts.append(data)
+            return
+        if self.in_heading:
+            self.heading_parts.append(data)
+            return
+        if self.in_cell:
+            self.cell_parts.append(data)
+            return
+        self.inline_parts.append(data)
+
+    def close(self):
+        super().close()
+        self._flush_block()
+
+
+def parse_html(path: Path) -> ParsedDocument:
+    """
+    Parse an HTML document using the standard library html.parser.
+    Drops script, style, nav, header, footer, aside, form, noscript and svg content.
+    Treats h1-h4 as section titles; page_number stays None.
+    Keeps paragraph, list item and table-row text ("a | b | c").
+    Uses the <title> as document title.
+    """
+    path = Path(path)
+    try:
+        content = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        content = path.read_text(encoding="latin-1", errors="ignore")
+
+    parser = _HTMLDocParser()
+    parser.feed(content)
+    parser.close()
+
+    return ParsedDocument(
+        blocks=parser.blocks,
+        title=parser.document_title,
+    )
+
+
 # ── Public entry point ─────────────────────────────────────────────────
 
 def parse_document(path: Path, file_type: str) -> ParsedDocument:
     """
-    Dispatch to the correct parser based on file_type ("pdf"|"docx"|"pptx").
+    Dispatch to the correct parser based on file_type ("pdf"|"docx"|"pptx"|"html").
     Raises ValueError with a user-friendly message on failure.
     """
     if file_type == "pdf":
@@ -267,5 +430,7 @@ def parse_document(path: Path, file_type: str) -> ParsedDocument:
         return _parse_docx(path)
     elif file_type == "pptx":
         return _parse_pptx(path)
+    elif file_type == "html":
+        return parse_html(path)
     else:
         raise ValueError(f"Unsupported file type: {file_type}")
